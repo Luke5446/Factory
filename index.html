@@ -173,7 +173,7 @@ input[type=number]{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <button id="zOut" aria-label="Zoom out">−</button>
         <button id="zFit" aria-label="Fit whole room" style="font-size:11px">Fit</button>
       </div>
-      <div class="hint">Drag items or doorways to move · <kbd>R</kbd> rotate · arrows nudge 5 cm · drag floor to pan · scroll to zoom</div>
+      <div class="hint">Drag items or doorways to move · drag the mezzanine deck or its handles to move or resize it · <kbd>R</kbd> rotate · arrows nudge 5 cm · drag floor to pan · scroll to zoom</div>
     </div>
 
     <aside class="panel">
@@ -188,6 +188,19 @@ input[type=number]{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <h2 id="hIss">Clearances</h2>
         <div class="chips" id="chips"></div>
         <ul class="issues" id="issues"></ul>
+      </section>
+
+      <section class="card" aria-labelledby="hMz" id="mzCard">
+        <h2 id="hMz">Mezzanine</h2>
+        <div class="form">
+          <label>From left wall (cm)<input id="mX" type="number" min="0" step="5"></label>
+          <label>From top wall (cm)<input id="mY" type="number" min="0" step="5"></label>
+          <label>Width (cm)<input id="mW" type="number" min="100" step="5"></label>
+          <label>Depth (cm)<input id="mH" type="number" min="100" step="5"></label>
+          <label class="full" style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px"><input id="mOver" type="checkbox" style="width:auto"> Show mezzanine over the ground floor</label>
+        </div>
+        <p class="note" id="mInfo" style="margin-top:8px"></p>
+        <p class="note">The mezzanine level is drawn to the right of the ground floor. Drag the deck to move it, or drag the round handles on its edges to resize it. Drag items onto the deck to place them upstairs.</p>
       </section>
 
       <section class="card" aria-labelledby="hSel" id="selCard">
@@ -261,6 +274,9 @@ const NS="http://www.w3.org/2000/svg";
 const ROOM={w:1850,h:2550};
 const PILLARS=[510,1020,1530,2040].map((y,i)=>({id:"p"+i,x:1784,y,w:66,h:45}));
 const TRAY={x:1960,y:0,w:440,h:760};
+const MX=2600; // x offset of the mezzanine level drawing
+const DEFAULT_MEZZ={x:750,y:400,w:1100,h:2150,overlay:true};
+const MZPILLARS=PILLARS.map(p=>Object.assign({},p,{x:p.x+MX}));
 const DEFAULT_DOORS=[
   {id:"d1",name:"Door to warehouse",side:"top",at:10,len:90},
   {id:"d2",name:"Fabric in",side:"top",at:280,len:150},
@@ -354,6 +370,7 @@ function analyse(items){
   for(const it of items){
     const r=res[it.id];
     if(inside(it,ROOMR)) r.place="room";
+    else if(inside(it,deckAbs())) r.place="mezz";
     else if(inside(it,TRAY)) r.place="tray";
     else r.place="out";
   }
@@ -365,12 +382,19 @@ function analyse(items){
     for(const w of walks) if(res[w.id].place==="room"&&ov(a,w)) res[a.id].walk.push(w.name);
     for(const z of DZ) if(ov(a,z)) res[a.id].door.push(z.name);
   }
+  const inMz=eq.filter(i=>res[i.id].place==="mezz");
+  for(let i=0;i<inMz.length;i++){
+    const a=inMz[i];
+    for(const p of MZPILLARS) if(ov(a,p)) res[a.id].clash.push("a pillar");
+    for(let j=i+1;j<inMz.length;j++){const b=inMz[j]; if(ov(a,b)){res[a.id].clash.push(b.name);res[b.id].clash.push(a.name);}}
+    for(const w of walks) if(res[w.id].place==="mezz"&&ov(a,w)) res[a.id].walk.push(w.name);
+  }
   const trayEq=eq.filter(i=>res[i.id].place==="tray");
   for(let i=0;i<trayEq.length;i++)for(let j=i+1;j<trayEq.length;j++){ /* tray overlaps ignored */ }
   return res;
 }
 function level(r,it){
-  if(it.dept==="walk") return r.place==="room"?"ok":"bad";
+  if(it.dept==="walk") return r.place==="room"||r.place==="mezz"?"ok":"bad";
   if(r.place==="out"||r.clash.length) return "bad";
   if(r.place==="tray") return "tray";
   if(r.walk.length||r.door.length) return "warn";
@@ -391,29 +415,34 @@ function areas(items,res){
 
 /* ---------- state ---------- */
 const LSK="tibard-floorplan-v1";
-let items,doors;
-{const st=load(); items=st?st.items:buildDraft(); doors=st&&Array.isArray(st.doors)?st.doors:clone(DEFAULT_DOORS);}
+let items,doors,mezz;
+{const st=load(); items=st?st.items:buildDraft(); doors=st&&Array.isArray(st.doors)?st.doors:clone(DEFAULT_DOORS); mezz=fixMezz(st&&st.mezz);}
+function fixMezz(m){m=Object.assign(clone(DEFAULT_MEZZ),m&&typeof m==="object"?m:{});
+  for(const k of["x","y","w","h"]) m[k]=isFinite(+m[k])?Math.round(+m[k]):DEFAULT_MEZZ[k];
+  m.w=Math.min(Math.max(m.w,100),ROOM.w);m.h=Math.min(Math.max(m.h,100),ROOM.h);
+  m.x=Math.min(Math.max(m.x,0),ROOM.w-m.w);m.y=Math.min(Math.max(m.y,0),ROOM.h-m.h);m.overlay=!!m.overlay;return m;}
+function deckAbs(){return{x:mezz.x+MX,y:mezz.y,w:mezz.w,h:mezz.h};}
 let selDoor=null,nextDoor=doors.reduce((m,d)=>Math.max(m,+String(d.id).replace(/\D/g,"")||0),0)+1;
 let selId=null,hist=[];
 let nextId=items.reduce((m,i)=>Math.max(m,+String(i.id).replace(/\D/g,"")||0),0)+1;
 function load(){try{const s=localStorage.getItem(LSK);if(!s)return null;const v=JSON.parse(s);if(Array.isArray(v))return v.length?{items:v}:null;return v&&Array.isArray(v.items)&&v.items.length?v:null;}catch(e){return null;}}
-function persist(){try{localStorage.setItem(LSK,JSON.stringify({items,doors}));}catch(e){}}
-const stateStr=()=>JSON.stringify({items,doors});
+function persist(){try{localStorage.setItem(LSK,JSON.stringify({items,doors,mezz}));}catch(e){}}
+const stateStr=()=>JSON.stringify({items,doors,mezz});
 function snapshot(){hist.push(stateStr());if(hist.length>80)hist.shift();$("bUndo").disabled=false;}
-function undo(){if(!hist.length)return;const v=JSON.parse(hist.pop());items=v.items;doors=v.doors;if(!items.find(i=>i.id===selId))selId=null;if(!doors.find(d=>d.id===selDoor))selDoor=null;$("bUndo").disabled=!hist.length;commit(false);}
+function undo(){if(!hist.length)return;const v=JSON.parse(hist.pop());items=v.items;doors=v.doors;mezz=fixMezz(v.mezz);if(!items.find(i=>i.id===selId))selId=null;if(!doors.find(d=>d.id===selDoor))selDoor=null;$("bUndo").disabled=!hist.length;commit(false);}
 const snap=v=>Math.round(v/SNAP)*SNAP;
 const byId=id=>items.find(i=>i.id===id);
 function $(id){return document.getElementById(id);}
 
 /* ---------- SVG ---------- */
 const svg=$("plan");
-const VB0={x:-140,y:-150,w:2600,h:2830};
+const VB0={x:-140,y:-150,w:MX+ROOM.w+260,h:2830};
 let view=Object.assign({},VB0);
 function setView(){svg.setAttribute("viewBox",`${view.x} ${view.y} ${view.w} ${view.h}`);}
 function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
 const cv=v=>`var(${v})`;
 
-const gStatic=el("g",{},svg), gDoors=el("g",{},svg), gWalk=el("g",{},svg), gItems=el("g",{},svg), gOver=el("g",{},svg);
+const gStatic=el("g",{},svg), gMezz=el("g",{},svg), gDoors=el("g",{},svg), gWalk=el("g",{},svg), gItems=el("g",{},svg), gGhost=el("g",{"pointer-events":"none"},svg), gOver=el("g",{},svg);
 
 function drawStatic(){
   gStatic.textContent="";
@@ -424,6 +453,9 @@ function drawStatic(){
   const tp=el("pattern",{id:"tape",width:40,height:40,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"},defs);
   el("rect",{width:40,height:40,fill:cv("--walk"),"fill-opacity":"0.16"},tp);
   el("rect",{width:10,height:40,fill:cv("--walk"),"fill-opacity":"0.16"},tp);
+  const vp=el("pattern",{id:"void",width:60,height:60,patternUnits:"userSpaceOnUse",patternTransform:"rotate(-45)"},defs);
+  el("rect",{width:60,height:60,fill:cv("--ground")},vp);
+  el("line",{x1:0,y1:0,x2:0,y2:60,stroke:cv("--line"),"stroke-width":3},vp);
   // tray
   el("rect",{x:TRAY.x,y:TRAY.y,width:TRAY.w,height:TRAY.h,fill:"none",stroke:cv("--muted"),"stroke-dasharray":"18 12","stroke-width":3,rx:12},gStatic);
   label(gStatic,TRAY.x+14,TRAY.y-40,"OFF THE FLOOR",30,"start",cv("--muted"),"600");
@@ -440,6 +472,14 @@ function drawStatic(){
   // overall dims
   dimLine(gStatic,0,ROOM.h+100,ROOM.w,ROOM.h+100,"18.50 m");
   dimLine(gStatic,-100,0,-100,ROOM.h,"25.50 m",true);
+  // level titles
+  label(gStatic,0,-95,"GROUND FLOOR",34,"start",cv("--muted"),"600");
+  label(gStatic,MX,-95,"MEZZANINE LEVEL",34,"start",cv("--muted"),"600");
+  // mezzanine level: same building footprint, open to below except the deck
+  el("rect",{x:MX,y:0,width:ROOM.w,height:ROOM.h,fill:"url(#void)"},gStatic);
+  el("rect",{x:MX-10,y:-10,width:ROOM.w+20,height:ROOM.h+20,fill:"none",stroke:cv("--wall"),"stroke-width":20},gStatic);
+  for(const p of MZPILLARS) el("rect",{x:p.x,y:p.y,width:p.w,height:p.h,fill:"url(#hatch)",stroke:cv("--wall"),"stroke-width":3},gStatic);
+  dimLine(gStatic,MX,ROOM.h+100,MX+ROOM.w,ROOM.h+100,"18.50 m");
   // scale bar
   const sb=el("g",{transform:`translate(${TRAY.x},${TRAY.y+TRAY.h+110})`},gStatic);
   for(let i=0;i<5;i++) el("rect",{x:i*100,y:0,width:100,height:18,fill:i%2?cv("--floor"):cv("--ink"),stroke:cv("--ink"),"stroke-width":2},sb);
@@ -459,6 +499,33 @@ function dimLine(p,x1,y1,x2,y2,txt,vert){
 }
 
 let RES={};
+function drawMezz(){
+  gMezz.textContent="";gGhost.textContent="";
+  const d=deckAbs(), c=cv("--sel");
+  const g=el("g",{"data-mezz":"move",style:"cursor:move"},gMezz);
+  el("rect",{x:d.x,y:d.y,width:d.w,height:d.h,fill:cv("--floor")},g);
+  for(let x=Math.ceil(mezz.x/100)*100;x<mezz.x+mezz.w;x+=100) el("line",{x1:x+MX,y1:d.y,x2:x+MX,y2:d.y+d.h,stroke:cv("--grid-major"),"stroke-width":2},g);
+  for(let y=Math.ceil(mezz.y/100)*100;y<mezz.y+mezz.h;y+=100) el("line",{x1:d.x,y1:y,x2:d.x+d.w,y2:y,stroke:cv("--grid-major"),"stroke-width":2},g);
+  el("rect",{x:d.x,y:d.y,width:d.w,height:d.h,fill:"none",stroke:cv("--wall"),"stroke-width":8},g);
+  const t=el("title",{},g);t.textContent=`Mezzanine deck · ${mezz.w} × ${mezz.h} cm · drag to move`;
+  // size labels
+  const lab=(x,y,txt,rot)=>{const b=el("g",{"pointer-events":"none"},gMezz);const w=txt.length*15+20;
+    el("rect",{x:x-w/2,y:y-18,width:w,height:36,rx:6,fill:cv("--panel"),stroke:cv("--wall"),"stroke-width":2,transform:rot?`rotate(-90 ${x} ${y})`:""},b);
+    const l=label(b,x,y+9,txt,24,"middle",cv("--ink"),"600");l.classList.add("dimtxt");if(rot)l.setAttribute("transform",`rotate(-90 ${x} ${y})`);};
+  lab(d.x+d.w/2,d.y+40,(mezz.w/100).toFixed(2)+" m");
+  lab(d.x+40,d.y+d.h/2,(mezz.h/100).toFixed(2)+" m",true);
+  // edge handles
+  const H=[["l",d.x,d.y+d.h/2,"ew-resize"],["r",d.x+d.w,d.y+d.h/2,"ew-resize"],["t",d.x+d.w/2,d.y,"ns-resize"],["b",d.x+d.w/2,d.y+d.h,"ns-resize"],
+    ["tl",d.x,d.y,"nwse-resize"],["br",d.x+d.w,d.y+d.h,"nwse-resize"],["tr",d.x+d.w,d.y,"nesw-resize"],["bl",d.x,d.y+d.h,"nesw-resize"]];
+  for(const [k,x,y,cur] of H){const h=el("g",{"data-mezz":k,style:"cursor:"+cur},gMezz);
+    el("circle",{cx:x,cy:y,r:40,fill:"transparent"},h);el("circle",{cx:x,cy:y,r:18,fill:cv("--panel"),stroke:c,"stroke-width":6},h);}
+  // ground-floor overlay
+  if(!mezz.overlay)return;
+  el("rect",{x:mezz.x,y:mezz.y,width:mezz.w,height:mezz.h,fill:c,"fill-opacity":"0.07",stroke:c,"stroke-width":6,"stroke-dasharray":"36 18"},gGhost);
+  for(const it of items){ if(RES[it.id]?.place!=="mezz"||it.dept==="walk")continue;
+    el("rect",{x:it.x-MX,y:it.y,width:it.w,height:it.h,rx:4,fill:"none",stroke:c,"stroke-width":2.5,"stroke-dasharray":"8 6","stroke-opacity":"0.8"},gGhost);}
+  const tl=label(gGhost,mezz.x+16,mezz.y+38,"MEZZANINE ABOVE",28,"start",c,"700");tl.setAttribute("fill",c);
+}
 function drawDoors(){
   gDoors.textContent="";
   for(const d of doors){
@@ -519,10 +586,12 @@ function drawOverlay(){
     else if(dr.side==="left"){gap(o,0,o,a,a,true);gap(o,e,o,W,b,true);}
     else {gap(ROOM.w-o,0,ROOM.w-o,a,a,true);gap(ROOM.w-o,e,ROOM.w-o,W,b,true);}
   }
-  const it=byId(selId); if(!it||it.dept==="walk"||RES[it.id].place!=="room") return;
-  const obs=items.filter(o=>o!==it&&o.dept!=="walk"&&RES[o.id].place==="room").concat(PILLARS);
+  const it=byId(selId); if(!it||it.dept==="walk") return;
+  const pl=RES[it.id].place; if(pl!=="room"&&pl!=="mezz") return;
+  const B=pl==="mezz"?deckAbs():ROOMR;
+  const obs=items.filter(o=>o!==it&&o.dept!=="walk"&&RES[o.id].place===pl).concat(pl==="mezz"?MZPILLARS:PILLARS);
   const vOv=o=>o.y<it.y+it.h&&o.y+o.h>it.y, hOv=o=>o.x<it.x+it.w&&o.x+o.w>it.x;
-  let R=ROOM.w-(it.x+it.w),L=it.x,D=ROOM.h-(it.y+it.h),U=it.y;
+  let R=B.x+B.w-(it.x+it.w),L=it.x-B.x,D=B.y+B.h-(it.y+it.h),U=it.y-B.y;
   for(const o of obs){
     if(vOv(o)){ if(o.x>=it.x+it.w-TOL) R=Math.min(R,o.x-(it.x+it.w)); if(o.x+o.w<=it.x+TOL) L=Math.min(L,it.x-(o.x+o.w)); }
     if(hOv(o)){ if(o.y>=it.y+it.h-TOL) D=Math.min(D,o.y-(it.y+it.h)); if(o.y+o.h<=it.y+TOL) U=Math.min(U,it.y-(o.y+o.h)); }
@@ -550,10 +619,15 @@ function drawPanel(){
     <div class="stat"><div class="v">${fmt(A.eq)}<small>m²</small></div><div class="k">Equipment on the floor</div></div>
     <div class="stat"><div class="v">${fmt(A.walk)}<small>m²</small></div><div class="k">Marked walkways</div></div>
     <div class="stat"><div class="v">${fmt(A.free)}<small>m²</small></div><div class="k">Working space and spare</div></div>`;
+  let mzEq=0,mzN=0;for(const it of items) if(RES[it.id].place==="mezz"&&it.dept!=="walk"){mzEq+=it.w*it.h/1e4;mzN++;}
+  $("stats").innerHTML+=`<div class="stat"><div class="v">${fmt(mezz.w*mezz.h/1e4)}<small>m²</small></div><div class="k">Mezzanine deck</div></div>
+    <div class="stat"><div class="v">${fmt(mzEq)}<small>m²</small></div><div class="k">Equipment on the mezzanine (${mzN})</div></div>`;
+  {const a=document.activeElement,sv=(id,v)=>{if(a!==$(id))$(id).value=v;};sv("mX",mezz.x);sv("mY",mezz.y);sv("mW",mezz.w);sv("mH",mezz.h);$("mOver").checked=mezz.overlay;
+   $("mInfo").textContent=`Deck ${mezz.w} × ${mezz.h} cm. Gap to walls: left ${mezz.x} cm, right ${ROOM.w-mezz.x-mezz.w} cm, top ${mezz.y} cm, bottom ${ROOM.h-mezz.y-mezz.h} cm.`;}
   const pc=v=>(v/usable*100).toFixed(2)+"%";
   $("bar").innerHTML=`<span style="width:${pc(A.eq)};background:var(--sew)"></span><span style="width:${pc(A.walk)};background:var(--walk)"></span>`;
   const by={};
-  for(const it of items){ if(it.dept==="walk")continue; const b=by[it.dept]||(by[it.dept]={a:0,n:0,t:0}); if(RES[it.id].place==="room"){b.a+=it.w*it.h/1e4;b.n++;} else b.t++; }
+  for(const it of items){ if(it.dept==="walk")continue; const b=by[it.dept]||(by[it.dept]={a:0,n:0,t:0}); if(RES[it.id].place==="room"||RES[it.id].place==="mezz"){b.a+=it.w*it.h/1e4;b.n++;} else b.t++; }
   $("depts").innerHTML=DORDER.filter(d=>d!=="walk"&&by[d]).map(d=>{const b=by[d];
     return `<div class="row"><span class="sw" style="color:var(${DEPTS[d].v})"></span><span>${DEPTS[d].label}</span><span>${fmt(b.a)} m²</span><span class="n">${b.n}${b.t?` +${b.t} off`:""}</span></div>`;}).join("");
   // issues
@@ -561,7 +635,7 @@ function drawPanel(){
   for(const it of items){ const r=RES[it.id], lv=level(r,it);
     if(it.dept==="walk"){ if(lv==="bad"){nb++;rows.push([it,"bad","Off floor","Walkway sits outside the room"]);} continue; }
     if(r.place==="tray"){nt++;continue;}
-    if(r.place==="out"){nb++;rows.push([it,"bad","Off room","Straddles the wall or sits outside the room"]);continue;}
+    if(r.place==="out"){nb++;rows.push([it,"bad","Off room","Straddles a wall or the mezzanine edge, or sits outside the room"]);continue;}
     if(r.clash.length){nb++;rows.push([it,"bad","Clash","Overlaps "+uniq(r.clash).join(", ")]);}
     if(r.walk.length){nw++;rows.push([it,"warn","Walkway","In "+uniq(r.walk).join(", ")]);}
     if(r.door.length){nd++;rows.push([it,"warn","Door","Within 1 m of "+uniq(r.door).join(", ")]);}
@@ -592,10 +666,11 @@ function drawPanel(){
   if(it){
     const a=document.activeElement;
     const setv=(id,v)=>{if(a!==$(id))$(id).value=v;};
-    setv("fName",it.name);setv("fDept",it.dept);setv("fW",it.w);setv("fH",it.h);setv("fX",it.x);setv("fY",it.y);
+    setv("fName",it.name);setv("fDept",it.dept);setv("fW",it.w);setv("fH",it.h);setv("fX",it.x-(RES[it.id].place==="mezz"?MX:0));setv("fY",it.y);
     const r=RES[it.id],lv=level(r,it),c=[];
     if(r.place==="tray")c.push(`<span class="chip neutral">Off the floor</span>`);
-    else if(r.place==="out")c.push(`<span class="chip bad">Not fully inside the room</span>`);
+    else if(r.place==="out")c.push(`<span class="chip bad">Not fully inside the room or on the mezzanine</span>`);
+    else if(r.place==="mezz")c.push(`<span class="chip neutral">On the mezzanine</span>`);
     if(r.clash.length)c.push(`<span class="chip bad">Overlaps ${esc(uniq(r.clash).join(", "))}</span>`);
     if(r.walk.length)c.push(`<span class="chip warn">In ${esc(uniq(r.walk).join(", "))}</span>`);
     if(r.door.length)c.push(`<span class="chip warn">Blocks ${esc(uniq(r.door).join(", "))}</span>`);
@@ -609,8 +684,8 @@ function drawPanel(){
 const uniq=a=>[...new Set(a)];
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-function render(){RES=analyse(items);drawDoors();drawItems();drawOverlay();drawPanel();}
-let raf=0;function renderSoon(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;RES=analyse(items);drawDoors();drawItems();drawOverlay();});}
+function render(){RES=analyse(items);drawMezz();drawDoors();drawItems();drawOverlay();drawPanel();}
+let raf=0;function renderSoon(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;RES=analyse(items);drawMezz();drawDoors();drawItems();drawOverlay();});}
 function commit(push){ if(push!==false){} persist(); render(); }
 
 /* ---------- interaction ---------- */
@@ -619,8 +694,9 @@ let drag=null;
 svg.addEventListener("pointerdown",e=>{
   if(e.button!==0&&e.pointerType==="mouse")return;
   svg.focus({preventScroll:true});
-  const t=e.target.closest("[data-id]"), td=e.target.closest("[data-door]"), p=toSvg(e);
-  if(t){ const it=byId(t.dataset.id); selId=it.id; selDoor=null; drag={mode:"item",id:it.id,dx:p.x-it.x,dy:p.y-it.y,ox:it.x,oy:it.y,moved:false,pre:stateStr()}; render(); }
+  const t=e.target.closest("[data-id]"), td=e.target.closest("[data-door]"), tm=e.target.closest("[data-mezz]"), p=toSvg(e);
+  if(tm&&!t){ drag={mode:"mezz",h:tm.dataset.mezz,sx:p.x,sy:p.y,o:Object.assign({},mezz),moved:false,pre:stateStr()}; }
+  else if(t){ const it=byId(t.dataset.id); selId=it.id; selDoor=null; drag={mode:"item",id:it.id,dx:p.x-it.x,dy:p.y-it.y,ox:it.x,oy:it.y,moved:false,pre:stateStr()}; render(); }
   else if(td){ const d=doors.find(x=>x.id===td.dataset.door); selDoor=d.id; selId=null;
     drag={mode:"door",id:d.id,off:(d.side==="top"||d.side==="bottom"?p.x:p.y)-d.at,side:d.side,moved:false,pre:stateStr()}; render(); }
   else { drag={mode:"pan",sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,k:view.w/svg.getBoundingClientRect().width,moved:false}; }
@@ -631,6 +707,16 @@ svg.addEventListener("pointermove",e=>{
   if(drag.mode==="item"){
     const p=toSvg(e),it=byId(drag.id); const nx=snap(p.x-drag.dx),ny=snap(p.y-drag.dy);
     if(nx!==it.x||ny!==it.y){it.x=nx;it.y=ny;drag.moved=true;renderSoon();}
+  }else if(drag.mode==="mezz"){
+    const p=toSvg(e),dx=snap(p.x-drag.sx),dy=snap(p.y-drag.sy),o=drag.o,h=drag.h,m={x:o.x,y:o.y,w:o.w,h:o.h};
+    if(h==="move"){m.x=Math.min(Math.max(o.x+dx,0),ROOM.w-o.w);m.y=Math.min(Math.max(o.y+dy,0),ROOM.h-o.h);}
+    else{
+      if(h.includes("l")){m.x=Math.min(Math.max(o.x+dx,0),o.x+o.w-100);m.w=o.x+o.w-m.x;}
+      if(h.includes("r")){m.w=Math.min(Math.max(o.w+dx,100),ROOM.w-o.x);}
+      if(h.includes("t")){m.y=Math.min(Math.max(o.y+dy,0),o.y+o.h-100);m.h=o.y+o.h-m.y;}
+      if(h.includes("b")){m.h=Math.min(Math.max(o.h+dy,100),ROOM.h-o.y);}
+    }
+    if(m.x!==mezz.x||m.y!==mezz.y||m.w!==mezz.w||m.h!==mezz.h){Object.assign(mezz,m);drag.moved=true;renderSoon();drawPanel();}
   }else if(drag.mode==="door"){
     const p=toSvg(e),d=doors.find(x=>x.id===drag.id);
     const ds={top:Math.abs(p.y),bottom:Math.abs(p.y-ROOM.h),left:Math.abs(p.x),right:Math.abs(p.x-ROOM.w)};
@@ -648,7 +734,7 @@ svg.addEventListener("pointermove",e=>{
 });
 function endDrag(){
   if(!drag)return;
-  if((drag.mode==="item"||drag.mode==="door")&&drag.moved){hist.push(drag.pre);if(hist.length>80)hist.shift();$("bUndo").disabled=false;commit();}
+  if((drag.mode==="item"||drag.mode==="door"||drag.mode==="mezz")&&drag.moved){hist.push(drag.pre);if(hist.length>80)hist.shift();$("bUndo").disabled=false;commit();}
   else if(drag.mode==="pan"&&!drag.moved){selId=null;selDoor=null;render();}
   else render();
   drag=null;
@@ -680,10 +766,10 @@ $("sDel").onclick=()=>{const b=$("sDel");if(!b.dataset.arm){b.dataset.arm="1";b.
   snapshot();items=items.filter(i=>i.id!==selId);selId=null;commit();};
 $("bUndo").onclick=undo;
 $("bAdd").onclick=()=>{snapshot();const it={id:"i"+(nextId++),name:"New item",dept:"sew",w:100,h:100,x:snap(view.x+view.w/2-50),y:snap(view.y+view.h/2-50)};
-  if(!inside(it,ROOMR)){it.x=ROOM.w/2-50;it.y=ROOM.h/2-50;}
+  if(!inside(it,ROOMR)&&!inside(it,deckAbs())){it.x=ROOM.w/2-50;it.y=ROOM.h/2-50;}
   items.push(it);selId=it.id;commit();$("fName").focus();$("fName").select();};
 $("bReset").onclick=()=>{const b=$("bReset");if(!b.dataset.arm){b.dataset.arm="1";b.textContent="Click again to reset";setTimeout(()=>{delete b.dataset.arm;b.textContent="Reset to draft";},4000);return;}
-  delete b.dataset.arm;b.textContent="Reset to draft";snapshot();items=buildDraft();doors=clone(DEFAULT_DOORS);nextId=items.length+1;selId=null;selDoor=null;commit();};
+  delete b.dataset.arm;b.textContent="Reset to draft";snapshot();items=buildDraft();doors=clone(DEFAULT_DOORS);mezz=fixMezz();nextId=items.length+1;selId=null;selDoor=null;commit();};
 
 function mutateDoor(fn){const d=doors.find(x=>x.id===selDoor);if(!d)return;snapshot();fn(d);d.len=Math.min(Math.max(d.len,40),wallLen(d.side));d.at=Math.min(Math.max(d.at,0),wallLen(d.side)-d.len);commit();}
 $("dName").addEventListener("change",()=>{const v=$("dName").value.trim();if(v)mutateDoor(d=>{d.name=v;});else drawPanel();});
@@ -699,7 +785,12 @@ $("fDept").innerHTML=DORDER.map(d=>`<option value="${d}">${DEPTS[d].label}</opti
 function field(id,key,num){$(id).addEventListener("change",()=>{const v=num?Math.round(+$(id).value):$(id).value.trim();
   if(num&&(!isFinite(v)||(key==="w"||key==="h")&&v<5))return drawPanel();if(!num&&!v)return drawPanel();
   mutate(it=>{it[key]=v;});});}
-field("fName","name");field("fDept","dept");field("fW","w",1);field("fH","h",1);field("fX","x",1);field("fY","y",1);
+field("fName","name");field("fDept","dept");field("fW","w",1);field("fH","h",1);field("fY","y",1);
+$("fX").addEventListener("change",()=>{const v=Math.round(+$("fX").value);if(!isFinite(v))return drawPanel();const it=byId(selId);if(!it)return;
+  const off=RES[it.id].place==="mezz"?MX:0;mutate(i=>{i.x=v+off;});});
+function mutateMezz(fn){snapshot();fn(mezz);mezz=fixMezz(mezz);commit();}
+[["mX","x"],["mY","y"],["mW","w"],["mH","h"]].forEach(([id,k])=>$(id).addEventListener("change",()=>{const v=Math.round(+$(id).value);if(!isFinite(v))return drawPanel();mutateMezz(m=>{m[k]=v;});}));
+$("mOver").addEventListener("change",()=>mutateMezz(m=>{m.overlay=$("mOver").checked;}));
 
 document.addEventListener("click",e=>{const bd=e.target.closest("[data-dsel]");if(bd){selDoor=bd.dataset.dsel;selId=null;render();return;}
   const b=e.target.closest("[data-sel]");if(!b)return;selId=b.dataset.sel;selDoor=null;render();
@@ -753,7 +844,7 @@ function refreshLocal(){renderSaved(localGet().slice().sort((a,b)=>String(b.save
 })();
 $("bSave").onclick=async()=>{
   const name=$("saveName").value.trim(); if(!name){status("Give the version a name first.");$("saveName").focus();return;}
-  const doc={name,items:clone(items),doors:clone(doors),savedAt:new Date().toISOString()}, id=slugify(name);
+  const doc={name,items:clone(items),doors:clone(doors),mezz:clone(mezz),savedAt:new Date().toISOString()}, id=slugify(name);
   if(mode==="shared"){
     $("bSave").disabled=true;status("Saving…");
     try{await db.collection("layouts").doc(id).set(doc);status("Saved “"+name+"”.");$("saveName").value="";setName(name);}
@@ -766,7 +857,7 @@ $("bSave").onclick=async()=>{
 };
 function loadLayout(v){
   if(!v||!Array.isArray(v.items))return false;
-  snapshot();items=clone(v.items);doors=Array.isArray(v.doors)?clone(v.doors):clone(DEFAULT_DOORS);selDoor=null;
+  snapshot();items=clone(v.items);doors=Array.isArray(v.doors)?clone(v.doors):clone(DEFAULT_DOORS);mezz=fixMezz(v.mezz);selDoor=null;
   nextId=items.reduce((m,i)=>Math.max(m,+String(i.id).replace(/\D/g,"")||0),0)+1;selId=null;setName(v.name||"");commit();return true;
 }
 $("savedList").addEventListener("click",async e=>{
@@ -778,7 +869,7 @@ $("savedList").addEventListener("click",async e=>{
 });
 $("bExport").onclick=()=>{
   const name=curName||"Working draft";
-  const data={app:"tibard-floorplan",version:1,name,savedAt:new Date().toISOString(),room:{widthCm:ROOM.w,lengthCm:ROOM.h},items,doors};
+  const data={app:"tibard-floorplan",version:1,name,savedAt:new Date().toISOString(),room:{widthCm:ROOM.w,lengthCm:ROOM.h},items,doors,mezz};
   const blob=new Blob([JSON.stringify(data,null,1)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="floor-layout-"+slugify(name)+"-"+new Date().toISOString().slice(0,10)+".json";
@@ -798,7 +889,7 @@ let printView=null;
 $("bPrint").onclick=()=>window.print();
 window.addEventListener("beforeprint",()=>{printView=Object.assign({},view);view=Object.assign({},VB0);setView();
   $("phDate").textContent=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
-  const s=selId,sd=selDoor;selId=null;selDoor=null;drawDoors();drawItems();drawOverlay();selId=s;selDoor=sd;});
+  const s=selId,sd=selDoor;selId=null;selDoor=null;drawMezz();drawDoors();drawItems();drawOverlay();selId=s;selDoor=sd;});
 window.addEventListener("afterprint",()=>{if(printView){view=printView;setView();}render();});
 setName("");
 
