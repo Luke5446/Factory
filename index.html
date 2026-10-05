@@ -173,7 +173,7 @@ input[type=number]{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <button id="zOut" aria-label="Zoom out">−</button>
         <button id="zFit" aria-label="Fit whole room" style="font-size:11px">Fit</button>
       </div>
-      <div class="hint">Drag items or doorways to move · drag the mezzanine deck or its handles to move or resize it · <kbd>R</kbd> rotate · arrows nudge 5 cm · drag floor to pan · scroll to zoom</div>
+      <div class="hint">Drag items or doorways to move · <kbd>Shift</kbd>+click to select several · drag the mezzanine deck or its handles to move or resize it · <kbd>R</kbd> rotate · arrows nudge 5 cm · drag floor to pan · scroll to zoom</div>
     </div>
 
     <aside class="panel">
@@ -424,6 +424,9 @@ function fixMezz(m){m=Object.assign(clone(DEFAULT_MEZZ),m&&typeof m==="object"?m
 function deckAbs(){return{x:mezz.x+MX,y:mezz.y,w:mezz.w,h:mezz.h};}
 let selDoor=null,nextDoor=doors.reduce((m,d)=>Math.max(m,+String(d.id).replace(/\D/g,"")||0),0)+1;
 let selId=null,hist=[];
+const multi=new Set(); // extra selected item ids (shift-click), besides selId
+const isSel=id=>id===selId||multi.has(id);
+const selItems=()=>items.filter(i=>isSel(i.id));
 let nextId=items.reduce((m,i)=>Math.max(m,+String(i.id).replace(/\D/g,"")||0),0)+1;
 function load(){try{const s=localStorage.getItem(LSK);if(!s)return null;const v=JSON.parse(s);if(Array.isArray(v))return v.length?{items:v}:null;return v&&Array.isArray(v.items)&&v.items.length?v:null;}catch(e){return null;}}
 function persist(){try{localStorage.setItem(LSK,JSON.stringify({items,doors,mezz}));}catch(e){}}
@@ -560,7 +563,7 @@ function drawItems(){
     if(!isWalk && (lv==="bad"||lv==="warn")){
       el("rect",{x:it.x-5,y:it.y-5,width:it.w+10,height:it.h+10,rx:7,fill:"none",stroke:cv(lv==="bad"?"--bad":"--warn"),"stroke-width":5,class:lv==="bad"?"pulse":""},g);
     }
-    if(it.id===selId) el("rect",{x:it.x-9,y:it.y-9,width:it.w+18,height:it.h+18,rx:9,fill:"none",stroke:cv("--sel"),"stroke-width":5},g);
+    if(isSel(it.id)) el("rect",{x:it.x-9,y:it.y-9,width:it.w+18,height:it.h+18,rx:9,fill:"none",stroke:cv("--sel"),"stroke-width":5},g);
     itemLabel(g,it,isWalk);
     const tt=el("title",{},g);tt.textContent=`${it.name} · ${it.w} × ${it.h} cm`;
   }
@@ -648,7 +651,7 @@ function drawPanel(){
   $("eqList").innerHTML=DORDER.map(d=>{
     const L=items.filter(i=>i.dept===d); if(!L.length)return "";
     return `<details data-d="${d}" ${open.has(d)?"open":""}><summary><span class="sw" style="color:var(${DEPTS[d].v})"></span>${DEPTS[d].label}<span class="n">${L.length}</span></summary><ul>${
-      L.map(i=>{const lv=level(RES[i.id],i);return `<li><button data-sel="${i.id}" aria-current="${i.id===selId}"><span class="dot ${lv==="ok"?"":lv}"></span><span>${esc(i.name)}</span><span class="dim">${i.w}×${i.h}</span></button></li>`;}).join("")}</ul></details>`;}).join("")
+      L.map(i=>{const lv=level(RES[i.id],i);return `<li><button data-sel="${i.id}" aria-current="${isSel(i.id)}"><span class="dot ${lv==="ok"?"":lv}"></span><span>${esc(i.name)}</span><span class="dim">${i.w}×${i.h}</span></button></li>`;}).join("")}</ul></details>`;}).join("")
     +`<details data-d="doors" ${open.has("doors")?"open":""}><summary><span class="sw" style="color:var(--muted)"></span>Doorways<span class="n">${doors.length}</span></summary><ul>${
       doors.map(d=>`<li><button data-dsel="${d.id}" aria-current="${d.id===selDoor}"><span class="dot ${d.fire?"":"tray"}"></span><span>${esc(d.name)}</span><span class="dim">${d.side} · ${d.len} cm</span></button></li>`).join("")}</ul></details>`;
   // selected
@@ -676,15 +679,16 @@ function drawPanel(){
     if(r.door.length)c.push(`<span class="chip warn">Blocks ${esc(uniq(r.door).join(", "))}</span>`);
     if(lv==="ok"&&r.place==="room")c.push(`<span class="chip ok">Clear</span>`);
     c.push(`<span class="chip neutral">${fmt(it.w*it.h/1e4)} m²</span>`);
+    if(multi.size){const S=selItems();c.unshift(`<span class="chip neutral">${S.length} items selected · ${fmt(S.reduce((a,i)=>a+i.w*i.h/1e4,0))} m² · drag or use arrows to move together</span>`);}
     $("selChips").innerHTML=c.join("");
     $("sTray").textContent=r.place==="tray"?"Put back on floor":"Move off floor";
-    $("sDel").textContent="Remove";delete $("sDel").dataset.arm;
+    $("sDel").textContent=multi.size?`Remove ${multi.size+1} items`:"Remove";delete $("sDel").dataset.arm;
   }
 }
 const uniq=a=>[...new Set(a)];
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-function render(){RES=analyse(items);drawMezz();drawDoors();drawItems();drawOverlay();drawPanel();}
+function render(){if(!selId)multi.clear();for(const id of multi)if(id===selId||!byId(id))multi.delete(id);RES=analyse(items);drawMezz();drawDoors();drawItems();drawOverlay();drawPanel();}
 let raf=0;function renderSoon(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;RES=analyse(items);drawMezz();drawDoors();drawItems();drawOverlay();});}
 function commit(push){ if(push!==false){} persist(); render(); }
 
@@ -696,7 +700,17 @@ svg.addEventListener("pointerdown",e=>{
   svg.focus({preventScroll:true});
   const t=e.target.closest("[data-id]"), td=e.target.closest("[data-door]"), tm=e.target.closest("[data-mezz]"), p=toSvg(e);
   if(tm&&!t){ drag={mode:"mezz",h:tm.dataset.mezz,sx:p.x,sy:p.y,o:Object.assign({},mezz),moved:false,pre:stateStr()}; }
-  else if(t){ const it=byId(t.dataset.id); selId=it.id; selDoor=null; drag={mode:"item",id:it.id,dx:p.x-it.x,dy:p.y-it.y,ox:it.x,oy:it.y,moved:false,pre:stateStr()}; render(); }
+  else if(t){ const it=byId(t.dataset.id); selDoor=null;
+    if(e.shiftKey&&isSel(it.id)){ // shift-click a selected item: take it out of the selection
+      if(it.id===selId){const n=[...multi];selId=n.pop()||null;multi.delete(selId);} else multi.delete(it.id);
+      render();
+    }else{
+      if(e.shiftKey){ if(selId) multi.add(selId); }
+      else if(!isSel(it.id)) multi.clear();
+      else if(it.id!==selId){ multi.add(selId); multi.delete(it.id); }
+      selId=it.id;
+      drag={mode:"item",id:it.id,dx:p.x-it.x,dy:p.y-it.y,ox:it.x,oy:it.y,group:selItems().map(i=>({id:i.id,ox:i.x,oy:i.y})),moved:false,pre:stateStr()}; render();
+    } }
   else if(td){ const d=doors.find(x=>x.id===td.dataset.door); selDoor=d.id; selId=null;
     drag={mode:"door",id:d.id,off:(d.side==="top"||d.side==="bottom"?p.x:p.y)-d.at,side:d.side,moved:false,pre:stateStr()}; render(); }
   else { drag={mode:"pan",sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,k:view.w/svg.getBoundingClientRect().width,moved:false}; }
@@ -706,7 +720,9 @@ svg.addEventListener("pointermove",e=>{
   if(!drag)return;
   if(drag.mode==="item"){
     const p=toSvg(e),it=byId(drag.id); const nx=snap(p.x-drag.dx),ny=snap(p.y-drag.dy);
-    if(nx!==it.x||ny!==it.y){it.x=nx;it.y=ny;drag.moved=true;renderSoon();}
+    if(nx!==it.x||ny!==it.y){const dx=nx-drag.ox,dy=ny-drag.oy;
+      for(const g of drag.group){const o=byId(g.id);if(o){o.x=g.ox+dx;o.y=g.oy+dy;}}
+      drag.moved=true;renderSoon();}
   }else if(drag.mode==="mezz"){
     const p=toSvg(e),dx=snap(p.x-drag.sx),dy=snap(p.y-drag.sy),o=drag.o,h=drag.h,m={x:o.x,y:o.y,w:o.w,h:o.h};
     if(h==="move"){m.x=Math.min(Math.max(o.x+dx,0),ROOM.w-o.w);m.y=Math.min(Math.max(o.y+dy,0),ROOM.h-o.h);}
@@ -763,7 +779,7 @@ $("bRotate").onclick=rotate;$("sRotate").onclick=rotate;
 $("bDup").onclick=duplicate;$("sDup").onclick=duplicate;
 $("sTray").onclick=toTray;
 $("sDel").onclick=()=>{const b=$("sDel");if(!b.dataset.arm){b.dataset.arm="1";b.textContent="Click again to remove";return;}
-  snapshot();items=items.filter(i=>i.id!==selId);selId=null;commit();};
+  snapshot();items=items.filter(i=>!isSel(i.id));selId=null;commit();};
 $("bUndo").onclick=undo;
 $("bAdd").onclick=()=>{snapshot();const it={id:"i"+(nextId++),name:"New item",dept:"sew",w:100,h:100,x:snap(view.x+view.w/2-50),y:snap(view.y+view.h/2-50)};
   if(!inside(it,ROOMR)&&!inside(it,deckAbs())){it.x=ROOM.w/2-50;it.y=ROOM.h/2-50;}
@@ -793,7 +809,9 @@ function mutateMezz(fn){snapshot();fn(mezz);mezz=fixMezz(mezz);commit();}
 $("mOver").addEventListener("change",()=>mutateMezz(m=>{m.overlay=$("mOver").checked;}));
 
 document.addEventListener("click",e=>{const bd=e.target.closest("[data-dsel]");if(bd){selDoor=bd.dataset.dsel;selId=null;render();return;}
-  const b=e.target.closest("[data-sel]");if(!b)return;selId=b.dataset.sel;selDoor=null;render();
+  const b=e.target.closest("[data-sel]");if(!b)return;
+  if(e.shiftKey&&selId&&b.dataset.sel!==selId){if(multi.has(b.dataset.sel)){multi.delete(b.dataset.sel);render();return;}multi.add(selId);}else if(!e.shiftKey)multi.clear();
+  selId=b.dataset.sel;selDoor=null;render();
   const it=byId(selId);if(it&&(it.x+it.w<view.x||it.x>view.x+view.w||it.y+it.h<view.y||it.y>view.y+view.h)){view.x=it.x+it.w/2-view.w/2;view.y=it.y+it.h/2-view.h/2;setView();}});
 document.addEventListener("keydown",e=>{
   const tag=(e.target.tagName||"").toLowerCase(); if(tag==="input"||tag==="select"||tag==="textarea")return;
@@ -809,7 +827,7 @@ document.addEventListener("keydown",e=>{
   if(!selId)return;
   const st=e.shiftKey?50:SNAP;
   const mv={ArrowLeft:[-st,0],ArrowRight:[st,0],ArrowUp:[0,-st],ArrowDown:[0,st]}[e.key];
-  if(mv){e.preventDefault();mutate(it=>{it.x+=mv[0];it.y+=mv[1];});}
+  if(mv){e.preventDefault();snapshot();for(const it of selItems()){it.x+=mv[0];it.y+=mv[1];}commit();}
   else if(e.key==="r"||e.key==="R"){e.preventDefault();rotate();}
   else if(e.key==="Escape"){selId=null;render();}
 });
@@ -889,7 +907,7 @@ let printView=null;
 $("bPrint").onclick=()=>window.print();
 window.addEventListener("beforeprint",()=>{printView=Object.assign({},view);view=Object.assign({},VB0);setView();
   $("phDate").textContent=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
-  const s=selId,sd=selDoor;selId=null;selDoor=null;drawMezz();drawDoors();drawItems();drawOverlay();selId=s;selDoor=sd;});
+  const s=selId,sd=selDoor,sm=[...multi];selId=null;selDoor=null;multi.clear();drawMezz();drawDoors();drawItems();drawOverlay();selId=s;selDoor=sd;sm.forEach(i=>multi.add(i));});
 window.addEventListener("afterprint",()=>{if(printView){view=printView;setView();}render();});
 setName("");
 
