@@ -217,6 +217,7 @@ input[type=number]{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             <label>Wall<select id="dSide"><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label>
             <label>Width (cm)<input id="dLen" type="number" min="40" step="10"></label>
             <label class="full"><span id="dAtLbl">From left corner (cm)</span><input id="dAt" type="number" min="0" step="5"></label>
+            <p class="note full" id="dGaps" style="margin:0"></p>
             <label class="full" style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px"><input id="dFire" type="checkbox" style="width:auto"> Fire exit</label>
           </div>
           <p class="note" style="margin-top:8px">Drag a doorway along a wall, or onto another wall, to move it. The dashed area in front of it is kept clear for 1 m.</p>
@@ -510,6 +511,14 @@ function itemLabel(g,it,isWalk){
 }
 function drawOverlay(){
   gOver.textContent="";
+  const dr=doors.find(d=>d.id===selDoor);
+  if(dr){
+    const a=dr.at, b=wallLen(dr.side)-(dr.at+dr.len), e=dr.at+dr.len, W=wallLen(dr.side), o=CLEAR+40;
+    if(dr.side==="top"){gap(0,o,a,o,a,true);gap(e,o,W,o,b,true);}
+    else if(dr.side==="bottom"){gap(0,ROOM.h-o,a,ROOM.h-o,a,true);gap(e,ROOM.h-o,W,ROOM.h-o,b,true);}
+    else if(dr.side==="left"){gap(o,0,o,a,a,true);gap(o,e,o,W,b,true);}
+    else {gap(ROOM.w-o,0,ROOM.w-o,a,a,true);gap(ROOM.w-o,e,ROOM.w-o,W,b,true);}
+  }
   const it=byId(selId); if(!it||it.dept==="walk"||RES[it.id].place!=="room") return;
   const obs=items.filter(o=>o!==it&&o.dept!=="walk"&&RES[o.id].place==="room").concat(PILLARS);
   const vOv=o=>o.y<it.y+it.h&&o.y+o.h>it.y, hOv=o=>o.x<it.x+it.w&&o.x+o.w>it.x;
@@ -522,8 +531,8 @@ function drawOverlay(){
   gap(it.x+it.w,cy,it.x+it.w+R,cy,R); gap(it.x-L,cy,it.x,cy,L);
   gap(cx,it.y+it.h,cx,it.y+it.h+D,D); gap(cx,it.y-U,cx,it.y,U);
 }
-function gap(x1,y1,x2,y2,d){
-  if(d<1||d>600)return;
+function gap(x1,y1,x2,y2,d,any){
+  if(d<1||(!any&&d>600))return;
   const tight=d<60;
   const c=cv(tight?"--warn":"--sel");
   el("line",{x1,y1,x2,y2,stroke:c,"stroke-width":3,"stroke-dasharray":"10 6"},gOver);
@@ -575,6 +584,8 @@ function drawPanel(){
     const a=document.activeElement, setv=(id,v)=>{if(a!==$(id))$(id).value=v;};
     setv("dName",dr.name);setv("dSide",dr.side);setv("dLen",dr.len);setv("dAt",dr.at);$("dFire").checked=!!dr.fire;
     $("dAtLbl").textContent=dr.side==="top"||dr.side==="bottom"?"From left corner (cm)":"From top corner (cm)";
+    const h=dr.side==="top"||dr.side==="bottom", rest=wallLen(dr.side)-dr.at-dr.len;
+    $("dGaps").textContent=`Distance to ${h?"left":"top"} wall: ${dr.at} cm · to ${h?"right":"bottom"} wall: ${rest} cm`;
     $("dDel").textContent="Remove doorway";delete $("dDel").dataset.arm;
   }
   ["bRotate","bDup"].forEach(b=>$(b).disabled=!it);
